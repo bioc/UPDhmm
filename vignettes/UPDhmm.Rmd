@@ -29,8 +29,8 @@ abstract: >
 output: 
   BiocStyle::html_document:
   number_sections: true
-  toc: yes
-  fig_caption: yes
+  toc: true
+  fig_caption: true
   toc_float: true
 vignette: >
   %\VignetteIndexEntry{Detection of UPDs in HTS data}

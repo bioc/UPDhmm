@@ -50,7 +50,6 @@ Suggests:
     karyoploteR,
     regioneR,
     dplyr
-VignetteBuilder: knitr
 Roxygen: list(markdown = TRUE)
 URL: https://github.com/martasevilla/UPDhmm
 Language: en-US
