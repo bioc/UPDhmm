@@ -1,57 +1,147 @@
-expected_def_blocks <- data.frame(
-    ID = "NA19675",
-    seqnames = "6",
-    start = 32489853,
-    end = 32489876,
-    group = "iso_mat",
-    n_snps = 3,
-    log_likelihood = 21.1,
-    p_value = 4e-6,
-    n_mendelian_error=2,
-    ratio_proband = 1,
-    ratio_mother=1,
-    ratio_father=1
-    
-)
+# test-calculateEvents.R
 
+# Expected UPD event blocks 
 expected_def_blocks <- data.frame(
   ID = c("NA19685", "NA19685"),
-  seqnames = c("6", "15"),
+  chromosome = c("6", "15"),
   start = c(32489853, 22368862),
   end = c(33499925, 42109975),
   group = c("het_mat", "iso_mat"),
   n_snps = c(5, 10),
-  log_likelihood = c(22.5, 3.6),
-  p_value = c(0.000002 , 0.055294),
-  n_mendelian_error = c(3, 6),
-  ratio_proband = c(1, 1),
-  ratio_mother = c(1, 1),
-  ratio_father = c(1, 1)
+  ratio_father = c(0.984479, 1.007761),
+  ratio_mother = c(0.968397, 1.015801),
+  ratio_proband = c(0.974526, 1.010190),
+  n_mendelian_error = c(3, 6)
 )
 
-
+expected_df_no_ratio <- data.frame(
+  ID = c("NA19685", "NA19685"),
+  chromosome = c("6", "15"),
+  start = c(32489853, 22368862),
+  end = c(33499925, 42109975),
+  group = c("het_mat", "iso_mat"),
+  n_snps = c(5, 10),
+  ratio_father = c(NA_real_, NA_real_),
+  ratio_mother = c(NA_real_, NA_real_),
+  ratio_proband = c(NA_real_, NA_real_),
+  n_mendelian_error = c(3, 6)
+)
 
 file <- system.file(package = "UPDhmm", "extdata", "test.vcf.gz")
 input <- VariantAnnotation::readVcf(file)
-SummarizedExperiment::colData(input)$ID <- colnames(input)
-colnames(input) <- c("proband", "father", "mother")
-test_that("Test if the general function works", {
-    out <- calculateEvents(input, field_DP = "DP")
-    out$seqnames <- as.character(out$seqnames)
-    out$log_likelihood <- floor(as.numeric(out$log_likelihood) * 10) / 10
-    out$p_value <- floor(as.numeric(out$p_value) * 10^6) / 10^6
-    out$ratio_proband <- round(out$ratio_proband)
-    out$ratio_mother <- round(out$ratio_mother)
-    out$ratio_father <- round(out$ratio_father)
+
+input <- vcfCheck(
+  largeCollapsedVcf = input,
+  father = "NA19689", mother = "NA19688",
+  proband = "NA19685", check_quality = TRUE
+)
+
+expected_mean <- c(father = 902/15, mother = 886/15, proband = 904/15)
+
+# ------------------------------------------------------------------------- #
+# Test computeTrioTotals using DP explicitly
+# ------------------------------------------------------------------------- #
+test_that("computeTrioTotals calculates mean read depths correctly with DP", {
+  mean_dp <- computeTrioTotals(vcf = input, field_DP = "DP")
+
+  expect_true(is.numeric(mean_dp))
+  expect_named(mean_dp, c("father", "mother", "proband"))
+  expect_equal(mean_dp, expected_mean)
+})
+
+# ------------------------------------------------------------------------- #
+# Test computeTrioTotals using AD explicitly
+# ------------------------------------------------------------------------- #
+test_that("computeTrioTotals calculates mean read depths correctly with AD", {
+  mean_dp <- computeTrioTotals(vcf = input, field_DP = "AD")
+
+  expect_true(is.numeric(mean_dp))
+  expect_named(mean_dp, c("father", "mother", "proband"))
+  expect_equal(mean_dp, expected_mean)
+})
+
+# ------------------------------------------------------------------------- #
+# Test computeTrioTotals without specifying a field
+# The function should automatically fall back to DP → AD
+# ------------------------------------------------------------------------- #
+test_that("computeTrioTotals calculates mean read depths correctly with default field", {
+  mean_dp <- computeTrioTotals(vcf = input)
+
+  expect_true(is.numeric(mean_dp))
+  expect_named(mean_dp, c("father", "mother", "proband"))
+  expect_equal(mean_dp, expected_mean)
+})
+
+# ------------------------------------------------------------------------ #
+# Modify DP and AD to introduce NA values
+# This tests whether computeTrioTotals properly ignores NA values
+# ------------------------------------------------------------------------ #
+
+g_dp <- VariantAnnotation::geno(input)$DP
+g_ad <- VariantAnnotation::geno(input)$AD
+
+# Introduce NA in proband DP at the first variant
+g_dp[1, "proband"] <- NA
+VariantAnnotation::geno(input)$DP <- g_dp
+
+# Introduce NA in proband AD (both alleles NA) at the first variant
+g_ad[1, "proband"][[1]] <- c(NA,NA)
+VariantAnnotation::geno(input)$AD <- g_ad
+
+# Expected sums and valid counts after introducing NA values
+expected_mean <- c(father = 902/15, mother = 886/15, proband = 844/14)
+
+# ------------------------------------------------------------------------- #
+# Repeat the three tests under conditions where NA values are present
+# ------------------------------------------------------------------------- #
+test_that("computeTrioTotals calculates mean read depths correctly with DP", {
+  mean_dp <- computeTrioTotals(vcf = input, field_DP = "DP")
+
+  expect_true(is.numeric(mean_dp))
+  expect_named(mean_dp, c("father", "mother", "proband"))
+  expect_equal(mean_dp, expected_mean)
+})
+
+test_that("computeTrioTotals calculates mean read depths correctly with AD", {
+  mean_dp <- computeTrioTotals(vcf = input, field_DP = "AD")
+
+  expect_true(is.numeric(mean_dp))
+  expect_named(mean_dp, c("father", "mother", "proband"))
+  expect_equal(mean_dp, expected_mean)
+})
+
+test_that("computeTrioTotals calculates mean read depths correctly with default field", {
+  mean_dp <- computeTrioTotals(vcf = input)
+
+  expect_true(is.numeric(mean_dp))
+  expect_named(mean_dp, c("father", "mother", "proband"))
+  expect_equal(mean_dp, expected_mean)
+})
+
+# ------------------------------------------------------------------------- #
+# Test calculateEvents() using default HMM (add_ratios = FALSE)
+# ------------------------------------------------------------------------- #
+test_that("Test if the general function works (default HMM, add_ratios = FALSE)", {
+  out <- calculateEvents(largeCollapsedVcf = input)
+  
+  out <- as.data.frame(out)
+  
+  expect_equal(out, expected_df_no_ratio)
+  expect_s3_class(out, "data.frame")
+})
+
+# ------------------------------------------------------------------------- #
+# Test calculateEvents() with default HMM and add_ratios = TRUE
+# ------------------------------------------------------------------------- #
+test_that("Test if the general function works (default HMM, add_ratios = TRUE)", {
+    out <- calculateEvents(largeCollapsedVcf = input, add_ratios = TRUE, field_DP = "DP")
+    
     out <- as.data.frame(out)
-    expect_equal(expected_def_blocks, out)
+    expect_equal(expected_def_blocks, out, tolerance = 1e-6)
     expect_s3_class(out, "data.frame")
 })
 
-
-
-
-
+# Custom HMM definition to test flexibility of calculateEvents()
 new_hmm<-list(
   States = c("normal", "iso_fat", "iso_mat", "het_fat", "het_mat")
   ,
@@ -78,8 +168,6 @@ new_hmm<-list(
       to = c("normal", "iso_fat", "iso_mat", "het_fat", "het_mat")
     )
   )
-  
-  
   ,
   emissionProbs = matrix(
     c(0.09250,0.00001,0.00001,0.09250,0.09250,0.00001,0.00001,0.09250,0.00001,0.09250,0.09250,0.00001,0.09250,0.12500,0.09250,0.00001,0.09250,0.09250,0.00001,0.09250,0.00001,0.00001,0.09250,0.09250,0.00001,0.00001,0.09250,0.00006,0.09250,0.00001,0.00001,0.12500,0.00001,0.00001,0.09250,0.00001,0.00001,0.09250,0.00001,0.09250,0.12500,0.00001,0.12500,0.09250,0.00001,0.09250,0.00001,0.00001,0.09250,0.00001,0.00001,0.12500,0.00001,0.00001,0.09250,0.00003,0.09250,0.00001,0.00001,0.09250,0.00001,0.09250,0.00001,0.00001,0.09250,0.12500,0.00001,0.00001,0.12500,0.00001,0.12500,0.00001,0.00001,0.12500,0.09250,0.00001,0.00001,0.09250,0.00001,0.09250,0.00001,0.00001,0.09250,0.00003,0.09250,0.00001,0.00001,0.12500,0.00001,0.00001,0.09250,0.00001,0.00001,0.00001,0.12500,0.00001,0.00001,0.25000,0.00001,0.00001,0.12500,0.00001,0.00001,0.00001,0.09250,0.00001,0.00001,0.12500,0.00001,0.00001,0.09250,0.00000,0.09250,0.00001,0.00001,0.00001,0.12500,0.00001,0.00001,0.00001,0.09250,0.12500,0.00001,0.00001,0.00001,0.25000,0.00001,0.00001,0.00001,0.12500,0.09250,0.00001,0.00001,0.00001,0.12500,0.00001,0.00001,0.00001,0.09250,0.00000),
@@ -95,48 +183,52 @@ new_hmm<-list(
       )
     )
   )
+)
 
-  )
-  
-  
-# Example manually created data.frame with expected UPD events
 expected_def_blocks <- data.frame(
   ID = c("NA19685", "NA19685"),
-  seqnames = c("6", "15"),
+  chromosome = c("6", "15"),
   start = c(32489853, 22368862),
   end = c(33499925, 42109975),
   group = c("het_mat", "iso_mat"),
   n_snps = c(5, 10),
-  log_likelihood = c(23.3, 4.4),
-  p_value = c(0.000001, 0.034753),
-  n_mendelian_error = c(3, 6),
-  ratio_proband = c(1, 1),
-  ratio_mother = c(1, 1),
-  ratio_father = c(1, 1)
+  ratio_father = c(0.984479, 1.007761),
+  ratio_mother = c(0.968397, 1.015801),
+  ratio_proband = c(0.978982, 1.010509),
+  n_mendelian_error = c(3, 6)
 )
 
-
+  
 file <- system.file(package = "UPDhmm", "extdata", "test.vcf.gz")
 input <- VariantAnnotation::readVcf(file)
-SummarizedExperiment::colData(input)$ID <- colnames(input)
-colnames(input) <- c("proband", "father", "mother")
-test_that("Test if the general function works with a different hmm", {
-  out <- calculateEvents(input,hmm = new_hmm, field_DP = "DP")
-  out$seqnames <- as.character(out$seqnames)
-  out$log_likelihood <- floor(as.numeric(out$log_likelihood) * 10) / 10
-  out$p_value <- floor(as.numeric(out$p_value) * 10^6) / 10^6
-  out$ratio_proband <- round(out$ratio_proband)
-  out$ratio_mother <- round(out$ratio_mother)
-  out$ratio_father <- round(out$ratio_father)
+
+input <- vcfCheck(
+  largeCollapsedVcf = input,
+  father = "NA19689", mother = "NA19688",
+  proband = "NA19685", check_quality = TRUE
+)
+
+# ------------------------------------------------------------------------- #
+# Test calculateEvents() using custom HMM, add_ratios = FALSE
+# ------------------------------------------------------------------------- #
+
+test_that("Test if the general function works (custom HMM, add_ratios = FALSE)", {
+  out <- calculateEvents(largeCollapsedVcf = input, hmm = new_hmm, field_DP = "DP")
+  
+  expect_equal(out, expected_df_no_ratio)
+  
   out <- as.data.frame(out)
-  expect_equal(expected_def_blocks, out)
   expect_s3_class(out, "data.frame")
 })
 
+# ------------------------------------------------------------------------- #
+# Test calculateEvents() using custom HMM, add_ratios = TRUE
+# ------------------------------------------------------------------------- #
 
-
+test_that("Test if the general function works (custom HMM, add_ratios = TRUE)", {
+  out <- calculateEvents(largeCollapsedVcf = input, hmm = new_hmm, field_DP = "DP", add_ratios = TRUE)
   
-  
-  
-  
-  
+  out <- as.data.frame(out)
+  expect_equal(expected_def_blocks, out, tolerance = 1e-6)
+  expect_s3_class(out, "data.frame")
+})
